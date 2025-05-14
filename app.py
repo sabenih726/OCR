@@ -1,91 +1,81 @@
-import os
-import easyocr
 import streamlit as st
-from PIL import Image
-import numpy as np
+import easyocr
 import pandas as pd
-import io
 import re
+from PIL import Image
+import io
 
-# Streamlit page setup
-st.set_page_config(page_title="OCR Paspor China", layout="wide")
-st.title("📄 OCR Paspor RRC (CN) - Multiple Upload + Export Excel")
+st.set_page_config(page_title="OCR Passport Extractor", layout="centered")
 
-# Buat folder model
-MODEL_DIR = './models'
-os.makedirs(MODEL_DIR, exist_ok=True)
+st.title("📄 OCR Passport Extractor (China Passport)")
 
-# Load EasyOCR
-@st.cache_resource
-def load_reader():
-    return easyocr.Reader(['en', 'ch_sim'], model_storage_directory=MODEL_DIR, gpu=False)
+uploaded_files = st.file_uploader("Upload passport images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-reader = load_reader()
+reader = easyocr.Reader(['en', 'ch_sim'], gpu=False)
 
-# Upload multiple image files
-uploaded_files = st.file_uploader("Unggah 1–20 gambar paspor (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+def extract_fields(text: str):
+    fields = {
+        "Name": "",
+        "Date of Birth": "",
+        "Place of Birth": "",
+        "Passport No": "",
+        "Expired Date": "",
+    }
 
-# Fungsi ekstraksi info dari OCR text
-def extract_info(text):
-    info = {}
+    # Passport No
+    passport_match = re.search(r'\b[PA]?\d{7,9}\b', text)
+    if passport_match:
+        fields["Passport No"] = passport_match.group()
 
-    match_name = re.search(r"Name\s*\n*(.*)", text)
-    if match_name:
-        info["Name"] = match_name.group(1).strip()
+    # Name
+    name_match = re.search(r'姓名\s*/\s*Name\s*([\u4e00-\u9fff]+\s*[A-Z]+\s*[A-Z]+)', text)
+    if name_match:
+        fields["Name"] = name_match.group(1).strip()
+    else:
+        # fallback
+        name_lines = [line for line in text.split('\n') if "Name" in line or "姓名" in line]
+        if name_lines:
+            fields["Name"] = name_lines[0].split()[-1]
 
-    match_pob = re.search(r"Place of birth\s*\n*(.*)", text)
-    if match_pob:
-        info["Place of Birth"] = match_pob.group(1).strip()
+    # Date of Birth
+    dob_match = re.search(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{4}', text, re.IGNORECASE)
+    if dob_match:
+        fields["Date of Birth"] = dob_match.group()
 
-    match_dob = re.search(r"Date of birth\s*\n*([\d]{1,2} \w+ \d{4})", text)
-    if match_dob:
-        info["Date of Birth"] = match_dob.group(1).strip()
+    # Place of Birth
+    pob_match = re.search(r'(出生地点|Place of bin|Place of birth)\s*/?.*\n(.+)', text, re.IGNORECASE)
+    if pob_match:
+        fields["Place of Birth"] = pob_match.group(2).strip()
 
-    match_exp = re.search(r"Date of expiry\s*\n*([\d]{1,2} \w+ \d{4})", text)
-    if match_exp:
-        info["Date of Expiry"] = match_exp.group(1).strip()
+    # Expired Date
+    exp_match = re.search(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{4}', text, re.IGNORECASE)
+    if exp_match:
+        fields["Expired Date"] = exp_match.group()
 
-    match_passport = re.search(r"Passport No\.?\s*\n*([A-Z0-9]+)", text)
-    if match_passport:
-        info["Passport Number"] = match_passport.group(1).strip()
+    return fields
 
-    return info
-
-# Proses setiap file
 if uploaded_files:
-    extracted_data = []
+    data = []
 
-    for file in uploaded_files:
-        st.markdown(f"---\n### 🖼️ {file.name}")
-        image = Image.open(file)
-        st.image(image, use_column_width=True)
+    for uploaded_file in uploaded_files:
+        st.subheader(f"📷 Image: {uploaded_file.name}")
+        image = Image.open(uploaded_file)
+        st.image(image, width=300)
 
-        with st.spinner(f"🔍 Memproses {file.name}..."):
-            image_np = np.array(image)
-            results = reader.readtext(image_np, detail=0)
-            full_text = "\n".join(results)
-            st.text(full_text)
+        with st.spinner("🔍 Running OCR..."):
+            result = reader.readtext(image, detail=0)
+            text = "\n".join(result)
+            st.text_area("📜 OCR Result", value=text, height=200)
 
-            info = extract_info(full_text)
-            info["Filename"] = file.name
-            extracted_data.append(info)
+            fields = extract_fields(text)
+            data.append(fields)
 
-    # Tampilkan hasil di tabel
-    df = pd.DataFrame(extracted_data)
-    st.subheader("📊 Hasil Ekstraksi")
+    df = pd.DataFrame(data)
+    st.subheader("🧾 Extracted Data")
     st.dataframe(df)
 
-    # Unduh sebagai Excel
-    def to_excel(df):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='OCR Results')
-        return output.getvalue()
-
-    excel_data = to_excel(df)
-    st.download_button(
-        label="📥 Unduh Hasil sebagai Excel",
-        data=excel_data,
-        file_name="hasil_ocr_paspor.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    # Export to Excel
+    excel_bytes = io.BytesIO()
+    with pd.ExcelWriter(excel_bytes, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+    st.download_button("📥 Download Excel", data=excel_bytes.getvalue(), file_name="passport_data.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
