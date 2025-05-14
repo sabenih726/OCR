@@ -11,6 +11,9 @@ reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
 
 # Fungsi ekstraksi field dari teks OCR
 def extract_fields_from_text(text):
+    # Membersihkan teks OCR agar lebih mudah diproses
+    text = text.replace("\n", " ").strip()
+    
     fields = {
         "Name": "",
         "Date of Birth": "",
@@ -19,30 +22,30 @@ def extract_fields_from_text(text):
         "Expired Date": ""
     }
 
-    # Ekstraksi Nama (setelah "姓名")
-    name_match = re.search(r"姓名\s*/?\s*(.*?)\s*/?\s*HAN\s*YIN", text)
+    # Ekstraksi Nama (setelah "姓名" atau "Name")
+    name_match = re.search(r"(姓名|Name)\s*[:/]*\s*(.*?)(?=\s*(?:性别|Sex|Date of birth|出生地点|Passport No))", text)
     if name_match:
-        fields["Name"] = name_match.group(1).strip()
+        fields["Name"] = name_match.group(2).strip()
 
-    # Ekstraksi Nomor Paspor (setelah "Passport No")
-    passport_match = re.search(r"Passport No\s*/?\s*(\S+)", text)
+    # Ekstraksi Nomor Paspor (setelah "Passport No" atau "护照")
+    passport_match = re.search(r"(Passport No|护照)\s*[:/]*\s*(\S+)", text)
     if passport_match:
-        fields["Passport No"] = passport_match.group(1).strip()
+        fields["Passport No"] = passport_match.group(2).strip()
 
     # Ekstraksi Tanggal Lahir (setelah "Date of birth")
-    dob_match = re.search(r"Date cf birth\s*(\d{1,2} \w{3} \d{4})", text)
+    dob_match = re.search(r"(Date of birth|出生日期)\s*[:/]*\s*(\d{1,2} \w{3} \d{4})", text)
     if dob_match:
-        fields["Date of Birth"] = dob_match.group(1).strip()
+        fields["Date of Birth"] = dob_match.group(2).strip()
 
     # Ekstraksi Tempat Lahir (setelah "Place of birth")
-    pob_match = re.search(r"出生地点\s*/?\s*(.*?)\s*/?", text)
+    pob_match = re.search(r"(Place of birth|出生地点)\s*[:/]*\s*(.*?)(?=\s*(?:Date of issue|Date Of expiry))", text)
     if pob_match:
-        fields["Place of Birth"] = pob_match.group(1).strip()
+        fields["Place of Birth"] = pob_match.group(2).strip()
 
-    # Ekstraksi Tanggal Kadaluarsa (setelah "Date of expiry")
-    expiry_match = re.search(r"Date Of expiry\s*/?\s*(\d{1,2} \w{3} \d{4})", text)
+    # Ekstraksi Tanggal Kadaluarsa (setelah "Date of expiry" atau "有效期至")
+    expiry_match = re.search(r"(Date of expiry|有效期至)\s*[:/]*\s*(\d{1,2} \w{3} \d{4})", text)
     if expiry_match:
-        fields["Expired Date"] = expiry_match.group(1).strip()
+        fields["Expired Date"] = expiry_match.group(2).strip()
 
     return fields
 
