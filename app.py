@@ -1,90 +1,62 @@
 import streamlit as st
-from PIL import Image
-import pytesseract
+import easyocr
 import pandas as pd
-import io
+import tempfile
+from PIL import Image
+import os
+
+# Inisialisasi EasyOCR reader
+reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+
+# Fungsi ekstraksi field dari teks OCR
 import re
 
-st.set_page_config(page_title="Passport OCR", layout="wide")
+def extract_fields_from_text(text):
+    name = re.search(r'姓名.*?\n(.*)', text)
+    dob = re.search(r'(Date of Birth|Date cf birth|Date of birth).*?\n([^\n]+)', text, re.IGNORECASE)
+    pob = re.search(r'(出生地点|Place of birth).*?\n(.*)', text, re.IGNORECASE)
+    passport = re.search(r'Passport\s*No.*?\n(.*)', text, re.IGNORECASE)
+    expiry = re.search(r'(Date Of expiry|有效期至).*?\n(.*)', text, re.IGNORECASE)
 
-st.title("📄 Passport OCR (China) - Extract Name, DOB, POB, Passport No, Expiry")
-
-uploaded_files = st.file_uploader("Upload passport image(s)", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-
-def extract_fields_tesseract(image):
-    data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DATAFRAME)
-    data = data.dropna(subset=['text'])
-
-    fields = {
-        "Name": "",
-        "Date of Birth": "",
-        "Place of Birth": "",
-        "Passport No": "",
-        "Expired Date": "",
+    return {
+        "Name": name.group(1).strip() if name else "",
+        "Date of Birth": dob.group(2).strip() if dob else "",
+        "Place of Birth": pob.group(2).strip() if pob else "",
+        "Passport No": passport.group(1).strip() if passport else "",
+        "Expired Date": expiry.group(2).strip() if expiry else ""
     }
 
-    text = " ".join(data['text'].tolist())
+# Streamlit App
+st.set_page_config(page_title="Passport OCR App", layout="centered")
+st.title("🛂 Passport OCR Extractor")
+st.markdown("Ekstrak informasi penting dari gambar paspor.")
 
-    # Name
-    name_match = re.search(r'姓名.?/?.?Name\s+(.+?)\s+([A-Z]+\s+[A-Z]+)', text)
-    if name_match:
-        fields["Name"] = f"{name_match.group(1).strip()} / {name_match.group(2).strip()}"
-    else:
-        # fallback: detect two-line Hanzi / Latin
-        hanzi = ""
-        latin = ""
-        for i, row in data.iterrows():
-            if "姓名" in row['text'] or "Name" in row['text']:
-                if i+2 < len(data):
-                    hanzi = data.iloc[i+1]['text']
-                    latin = data.iloc[i+2]['text']
-                break
-        if hanzi and latin:
-            fields["Name"] = f"{hanzi.strip()} / {latin.strip()}"
+uploaded_file = st.file_uploader("Unggah gambar paspor (JPEG/PNG)", type=['jpg', 'jpeg', 'png'])
 
-    # Passport No
-    passport_match = re.search(r'\b[P]?\d{7,9}\b', text)
-    if passport_match:
-        fields["Passport No"] = passport_match.group()
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
 
-    # Date of Birth
-    dob_match = re.search(r'(\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4})', text, re.IGNORECASE)
-    if dob_match:
-        fields["Date of Birth"] = dob_match.group(0)
+    image = Image.open(tmp_path)
+    st.image(image, caption='Gambar Diunggah', use_column_width=True)
 
-    # Place of Birth
-    pob_match = re.search(r'出生地点.?/?Place of birth\s+(.+?)(\s+[A-Z]+)?\s+Date', text)
-    if pob_match:
-        fields["Place of Birth"] = pob_match.group(1).strip()
+    with st.spinner("🔍 Menjalankan OCR..."):
+        results = reader.readtext(tmp_path)
+        ocr_text = "\n".join([res[1] for res in results])
+        st.text_area("📄 Hasil OCR Mentah", ocr_text, height=300)
 
-    # Expired Date
-    exp_match = re.findall(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{4}', text, re.IGNORECASE)
-    if len(exp_match) >= 2:
-        # heuristik: tanggal kedua adalah expired
-        exp_texts = re.findall(r'\d{1,2}\s+[A-Z]+\s+\d{4}', text)
-        fields["Expired Date"] = exp_texts[1]
+        fields = extract_fields_from_text(ocr_text)
 
-    return fields
+        st.markdown("### 📌 Hasil Ekstraksi")
+        df = pd.DataFrame([fields])
+        st.dataframe(df)
 
+        # Simpan ke Excel
+        output_excel = "hasil_ekstraksi.xlsx"
+        df.to_excel(output_excel, index=False)
+        with open(output_excel, "rb") as f:
+            st.download_button("📥 Unduh Hasil Excel", data=f, file_name="passport_data.xlsx")
 
-if uploaded_files:
-    results = []
-    for uploaded_file in uploaded_files:
-        st.markdown("---")
-        st.image(uploaded_file, caption=uploaded_file.name, use_column_width=True)
-
-        image = Image.open(uploaded_file)
-        fields = extract_fields_tesseract(image)
-        results.append(fields)
-
-        st.subheader("Extracted Info")
-        st.json(fields)
-
-    # Export to Excel
-    df = pd.DataFrame(results)
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Passport OCR")
-
-    st.download_button("📥 Download Excel", data=buffer.getvalue(), file_name="passport_ocr.xlsx")
-
+        # Bersihkan file sementara
+        os.remove(tmp_path)
