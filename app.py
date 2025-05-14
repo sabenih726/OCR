@@ -22,35 +22,54 @@ def extract_fields(text: str):
         "Expired Date": "",
     }
 
-    # Passport No
-    passport_match = re.search(r'\b[PA]?\d{7,9}\b', text)
-    if passport_match:
-        fields["Passport No"] = passport_match.group()
+    lines = text.split("\n")
 
-    # Name
-    name_match = re.search(r'姓名\s*/\s*Name\s*([\u4e00-\u9fff]+\s*[A-Z]+\s*[A-Z]+)', text)
-    if name_match:
-        fields["Name"] = name_match.group(1).strip()
-    else:
-        # fallback
-        name_lines = [line for line in text.split('\n') if "Name" in line or "姓名" in line]
-        if name_lines:
-            fields["Name"] = name_lines[0].split()[-1]
+    # Normalize all lines (remove extra spaces, lowercase for search)
+    norm_lines = [line.strip() for line in lines]
+
+    # Loop for Name
+    for i, line in enumerate(norm_lines):
+        if "姓名" in line or "name" in line.lower():
+            # Expecting Hanzi and Latin name in next 1-2 lines
+            possible_name = ""
+            if i + 2 < len(norm_lines):
+                hanzi = norm_lines[i + 1]
+                latin = norm_lines[i + 2]
+                possible_name = f"{hanzi} / {latin}"
+            elif i + 1 < len(norm_lines):
+                possible_name = norm_lines[i + 1]
+            fields["Name"] = possible_name.strip()
+            break
+
+    # Passport No
+    for line in norm_lines:
+        match = re.search(r'\b[PA]?\d{7,9}\b', line)
+        if match:
+            fields["Passport No"] = match.group()
+            break
 
     # Date of Birth
-    dob_match = re.search(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{4}', text, re.IGNORECASE)
-    if dob_match:
-        fields["Date of Birth"] = dob_match.group()
+    for i, line in enumerate(norm_lines):
+        if "birth" in line.lower():
+            dob_match = re.search(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{4}', norm_lines[i + 1] if i + 1 < len(norm_lines) else "", re.IGNORECASE)
+            if dob_match:
+                fields["Date of Birth"] = dob_match.group()
+                break
 
     # Place of Birth
-    pob_match = re.search(r'(出生地点|Place of bin|Place of birth)\s*/?.*\n(.+)', text, re.IGNORECASE)
-    if pob_match:
-        fields["Place of Birth"] = pob_match.group(2).strip()
+    for i, line in enumerate(norm_lines):
+        if "place of birth" in line.lower() or "出生地点" in line:
+            if i + 1 < len(norm_lines):
+                fields["Place of Birth"] = norm_lines[i + 1]
+                break
 
     # Expired Date
-    exp_match = re.search(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{4}', text, re.IGNORECASE)
-    if exp_match:
-        fields["Expired Date"] = exp_match.group()
+    for i, line in enumerate(norm_lines):
+        if "expiry" in line.lower() or "有效" in line:
+            match = re.search(r'\d{1,2}\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+\d{4}', line, re.IGNORECASE)
+            if match:
+                fields["Expired Date"] = match.group()
+                break
 
     return fields
 
