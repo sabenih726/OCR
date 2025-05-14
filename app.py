@@ -4,15 +4,13 @@ import pandas as pd
 import tempfile
 from PIL import Image
 import os
+import re
 
 # Inisialisasi EasyOCR reader
 reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
 
 # Fungsi ekstraksi field dari teks OCR
-import re
-
 def extract_fields_from_text(text):
-    lines = text.splitlines()
     fields = {
         "Name": "",
         "Date of Birth": "",
@@ -21,26 +19,30 @@ def extract_fields_from_text(text):
         "Expired Date": ""
     }
 
-    for i, line in enumerate(lines):
-        line_lower = line.lower()
+    # Ekstraksi Nama (setelah "姓名")
+    name_match = re.search(r"姓名\s*/?\s*(.*?)\s*/?\s*HAN\s*YIN", text)
+    if name_match:
+        fields["Name"] = name_match.group(1).strip()
 
-        if "name" in line_lower or "姓名" in line:
-            # Ambil 1–2 baris berikutnya
-            next_line = lines[i+1] if i+1 < len(lines) else ""
-            second_line = lines[i+2] if i+2 < len(lines) else ""
-            fields["Name"] = f"{next_line.strip()} / {second_line.strip()}".strip(" /")
+    # Ekstraksi Nomor Paspor (setelah "Passport No")
+    passport_match = re.search(r"Passport No\s*/?\s*(\S+)", text)
+    if passport_match:
+        fields["Passport No"] = passport_match.group(1).strip()
 
-        elif "passport" in line_lower and "no" in line_lower:
-            fields["Passport No"] = lines[i+1].strip() if i+1 < len(lines) else ""
+    # Ekstraksi Tanggal Lahir (setelah "Date of birth")
+    dob_match = re.search(r"Date cf birth\s*(\d{1,2} \w{3} \d{4})", text)
+    if dob_match:
+        fields["Date of Birth"] = dob_match.group(1).strip()
 
-        elif "birth" in line_lower and "date" in line_lower:
-            fields["Date of Birth"] = lines[i+1].strip() if i+1 < len(lines) else ""
+    # Ekstraksi Tempat Lahir (setelah "Place of birth")
+    pob_match = re.search(r"出生地点\s*/?\s*(.*?)\s*/?", text)
+    if pob_match:
+        fields["Place of Birth"] = pob_match.group(1).strip()
 
-        elif "place of birth" in line_lower or "出生地点" in line:
-            fields["Place of Birth"] = lines[i+1].strip() if i+1 < len(lines) else ""
-
-        elif "expiry" in line_lower or "有效期至" in line:
-            fields["Expired Date"] = lines[i+1].strip() if i+1 < len(lines) else ""
+    # Ekstraksi Tanggal Kadaluarsa (setelah "Date of expiry")
+    expiry_match = re.search(r"Date Of expiry\s*/?\s*(\d{1,2} \w{3} \d{4})", text)
+    if expiry_match:
+        fields["Expired Date"] = expiry_match.group(1).strip()
 
     return fields
 
