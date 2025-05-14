@@ -12,19 +12,37 @@ reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
 import re
 
 def extract_fields_from_text(text):
-    name = re.search(r'姓名.*?\n(.*)', text)
-    dob = re.search(r'(Date of Birth|Date cf birth|Date of birth).*?\n([^\n]+)', text, re.IGNORECASE)
-    pob = re.search(r'(出生地点|Place of birth).*?\n(.*)', text, re.IGNORECASE)
-    passport = re.search(r'Passport\s*No.*?\n(.*)', text, re.IGNORECASE)
-    expiry = re.search(r'(Date Of expiry|有效期至).*?\n(.*)', text, re.IGNORECASE)
-
-    return {
-        "Name": name.group(1).strip() if name else "",
-        "Date of Birth": dob.group(2).strip() if dob else "",
-        "Place of Birth": pob.group(2).strip() if pob else "",
-        "Passport No": passport.group(1).strip() if passport else "",
-        "Expired Date": expiry.group(2).strip() if expiry else ""
+    lines = text.splitlines()
+    fields = {
+        "Name": "",
+        "Date of Birth": "",
+        "Place of Birth": "",
+        "Passport No": "",
+        "Expired Date": ""
     }
+
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+
+        if "name" in line_lower or "姓名" in line:
+            # Ambil 1–2 baris berikutnya
+            next_line = lines[i+1] if i+1 < len(lines) else ""
+            second_line = lines[i+2] if i+2 < len(lines) else ""
+            fields["Name"] = f"{next_line.strip()} / {second_line.strip()}".strip(" /")
+
+        elif "passport" in line_lower and "no" in line_lower:
+            fields["Passport No"] = lines[i+1].strip() if i+1 < len(lines) else ""
+
+        elif "birth" in line_lower and "date" in line_lower:
+            fields["Date of Birth"] = lines[i+1].strip() if i+1 < len(lines) else ""
+
+        elif "place of birth" in line_lower or "出生地点" in line:
+            fields["Place of Birth"] = lines[i+1].strip() if i+1 < len(lines) else ""
+
+        elif "expiry" in line_lower or "有效期至" in line:
+            fields["Expired Date"] = lines[i+1].strip() if i+1 < len(lines) else ""
+
+    return fields
 
 # Streamlit App
 st.set_page_config(page_title="Passport OCR App", layout="centered")
